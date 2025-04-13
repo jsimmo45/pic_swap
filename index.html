@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Jigsaw Puzzle Game</title>
+  <style>
+    /* General Styles */
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      margin: 0;
+      padding: 0;
+    }
+    #menu {
+      padding: 20px;
+      background-color: #ffffff;
+      text-align: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    #menu div {
+      margin: 10px 0;
+    }
+    #gameInfo {
+      padding: 10px 20px;
+      background-color: #fff;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    #gameContainer {
+      margin: 20px auto;
+      width: 400px;
+      height: 400px;
+      position: relative;
+      display: grid;
+      border: 2px solid #333;
+      background-color: #ddd;
+    }
+    .puzzle-piece {
+      border: 1px solid #fff;
+      background-repeat: no-repeat;
+      background-size: 100%;
+      cursor: pointer;
+    }
+    .selected {
+      outline: 3px solid red;
+    }
+    #overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #fff;
+      font-size: 24px;
+      z-index: 1000;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- Setup Menu -->
+  <div id="menu">
+    <h1>Jigsaw Puzzle Game</h1>
+    <div>
+      <label for="gameMode">Select Mode:</label>
+      <select id="gameMode">
+        <option value="normal">Normal</option>
+        <option value="timed">Timed Challenge</option>
+        <option value="limited">Limited Moves</option>
+      </select>
+    </div>
+    <div id="timerSettings" style="display:none;">
+      <label for="timeLimit">Time Limit (seconds):</label>
+      <input type="number" id="timeLimit" value="60">
+    </div>
+    <div id="movesSettings" style="display:none;">
+      <label for="moveLimit">Move Limit:</label>
+      <input type="number" id="moveLimit" value="30">
+    </div>
+    <div>
+      <label for="gridSize">Grid Size:</label>
+      <select id="gridSize">
+        <option value="3">3 x 3</option>
+        <option value="4">4 x 4</option>
+        <option value="5">5 x 5</option>
+      </select>
+    </div>
+    <div>
+      <label for="gallerySelect">Gallery:</label>
+      <select id="gallerySelect">
+        <option value="nature">Nature</option>
+        <option value="abstract">Abstract</option>
+      </select>
+    </div>
+    <button id="startGame">Start Game</button>
+  </div>
+
+  <!-- Game Information Panel -->
+  <div id="gameInfo" style="display:none;">
+    <div>Moves: <span id="moveCount">0</span></div>
+    <div id="timeDisplayContainer">Time: <span id="timeDisplay">0</span> sec</div>
+    <div id="movesLeftDisplay" style="display:none;">Moves Left: <span id="movesLeft"></span></div>
+  </div>
+
+  <!-- Game Board Container -->
+  <div id="gameContainer"></div>
+
+  <!-- Overlay for Winning or Game Over -->
+  <div id="overlay" style="display:none;">
+    <div id="overlayContent"></div>
+  </div>
+
+  <script>
+    // Global variables
+    let gridSize;
+    let mode;
+    let timeLimit;
+    let moveLimit;
+    let moveCount = 0;
+    let timerInterval;
+    let elapsedTime = 0;
+    let remainingTime = 0;
+    let selectedPiece = null;
+    let board = []; // Holds the current puzzle piece order
+    let correctOrder = []; // The target correct order of pieces
+    let currentImage;
+    let pieceWidth;
+    let pieceHeight;
+
+    // Curated galleries with sample images (ensure these images exist in your images folder)
+    const galleries = {
+      nature: [
+        "images/nature1.jpg",
+        "images/nature2.jpg",
+        "images/nature3.jpg"
+      ],
+      abstract: [
+        "images/abstract1.jpg",
+        "images/abstract2.jpg",
+        "images/abstract3.jpg"
+      ]
+    };
+
+    // DOM Elements
+    const startButton = document.getElementById("startGame");
+    const gameModeSelect = document.getElementById("gameMode");
+    const gridSizeSelect = document.getElementById("gridSize");
+    const gallerySelect = document.getElementById("gallerySelect");
+    const timeLimitInput = document.getElementById("timeLimit");
+    const moveLimitInput = document.getElementById("moveLimit");
+    const timerSettings = document.getElementById("timerSettings");
+    const movesSettings = document.getElementById("movesSettings");
+    const moveCountDisplay = document.getElementById("moveCount");
+    const timeDisplay = document.getElementById("timeDisplay");
+    const movesLeftDisplay = document.getElementById("movesLeftDisplay");
+    const movesLeftSpan = document.getElementById("movesLeft");
+    const gameContainer = document.getElementById("gameContainer");
+    const gameInfo = document.getElementById("gameInfo");
+    const overlay = document.getElementById("overlay");
+    const overlayContent = document.getElementById("overlayContent");
+
+    // Listen for mode changes to show/hide additional settings
+    gameModeSelect.addEventListener("change", function() {
+      mode = gameModeSelect.value;
+      if (mode === "timed") {
+        timerSettings.style.display = "block";
+        movesSettings.style.display = "none";
+      } else if (mode === "limited") {
+        movesSettings.style.display = "block";
+        timerSettings.style.display = "none";
+      } else {
+        timerSettings.style.display = "none";
+        movesSettings.style.display = "none";
+      }
+    });
+    // Default mode
+    mode = gameModeSelect.value;
+
+    // Start game when user clicks button
+    startButton.addEventListener("click", startGame);
+
+    function startGame() {
+      // Reset game variables
+      moveCount = 0;
+      elapsedTime = 0;
+      selectedPiece = null;
+      clearInterval(timerInterval);
+      overlay.style.display = "none";
+
+      // Read settings from menu
+      gridSize = parseInt(gridSizeSelect.value);
+      mode = gameModeSelect.value;
+      if (mode === "timed") {
+        timeLimit = parseInt(timeLimitInput.value);
+        remainingTime = timeLimit;
+      }
+      if (mode === "limited") {
+        moveLimit = parseInt(moveLimitInput.value);
+      }
+
+      // Update UI elements for game info
+      gameInfo.style.display = "flex";
+      moveCountDisplay.textContent = moveCount;
+      timeDisplay.textContent = mode === "timed" ? remainingTime : elapsedTime;
+      if (mode === "limited") {
+        movesLeftDisplay.style.display = "block";
+        movesLeftSpan.textContent = moveLimit - moveCount;
+      } else {
+        movesLeftDisplay.style.display = "none";
+      }
+
+      // Clear previous board
+      gameContainer.innerHTML = "";
+      // Set grid layout for container based on grid size
+      gameContainer.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+      gameContainer.style.width = "400px";
+      gameContainer.style.height = "400px";
+
+      // Load a random image from the selected gallery
+      const gallery = gallerySelect.value;
+      const images = galleries[gallery];
+      const imageSrc = images[Math.floor(Math.random() * images.length)];
+      currentImage = new Image();
+      currentImage.src = imageSrc;
+      currentImage.onload = function() {
+        // Calculate dimensions for each puzzle piece
+        pieceWidth = gameContainer.clientWidth / gridSize;
+        pieceHeight = gameContainer.clientHeight / gridSize;
+        // Setup board arrays
+        board = [];
+        correctOrder = [];
+        for (let row = 0; row < gridSize; row++) {
+          for (let col = 0; col < gridSize; col++) {
+            let index = row * gridSize + col;
+            correctOrder.push(index);
+            board.push(index);
+          }
+        }
+        // Shuffle the pieces randomly
+        shuffleArray(board);
+        // Create and display puzzle pieces
+        createPuzzlePieces();
+        // Start the timer (up or down based on mode)
+        startTimer();
+      }
+    }
+
+    // Shuffle function using Fisher-Yates algorithm
+    function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    // Create puzzle pieces as div elements with CSS background images
+    function createPuzzlePieces() {
+      gameContainer.innerHTML = "";
+      for (let i = 0; i < board.length; i++) {
+        // The value in board[i] tells the correct index for the piece that occupies this slot
+        let correctIndex = board[i];
+        let correctRow = Math.floor(correctIndex / gridSize);
+        let correctCol = correctIndex % gridSize;
+
+        let piece = document.createElement("div");
+        piece.classList.add("puzzle-piece");
+        piece.style.width = pieceWidth + "px";
+        piece.style.height = pieceHeight + "px";
+        // Set the background image and adjust the background position so that the right part is visible
+        piece.style.backgroundImage = `url(${currentImage.src})`;
+        piece.style.backgroundSize = `${gridSize * 100}% ${gridSize * 100}%`;
+        piece.style.backgroundPosition = `-${correctCol * pieceWidth}px -${correctRow * pieceHeight}px`;
+        // Save correct index and the current board order index on the element
+        piece.dataset.correctIndex = correctIndex;
+        piece.dataset.currentIndex = i;
+        piece.setAttribute("draggable", "true");
+
+        // Add event listeners for both click and drag-drop
+        piece.addEventListener("click", handleClick);
+        piece.addEventListener("dragstart", handleDragStart);
+        piece.addEventListener("dragover", handleDragOver);
+        piece.addEventListener("drop", handleDrop);
+        piece.addEventListener("dragend", handleDragEnd);
+
+        gameContainer.appendChild(piece);
+      }
+    }
+
+    // Handle clicks: select first piece, then on second click swap them
+    function handleClick(e) {
+      const piece = e.target;
+      if (!selectedPiece) {
+        selectedPiece = piece;
+        piece.classList.add("selected");
+      } else if (selectedPiece === piece) {
+        // Deselect if clicked again
+        piece.classList.remove("selected");
+        selectedPiece = null;
+      } else {
+        swapPieces(selectedPiece, piece);
+        selectedPiece.classList.remove("selected");
+        selectedPiece = null;
+      }
+    }
+
+    // Drag and Drop functionality
+    function handleDragStart(e) {
+      e.dataTransfer.setData("text/plain", e.target.dataset.currentIndex);
+      e.target.classList.add("selected");
+    }
+    function handleDragOver(e) {
+      e.preventDefault();
+    }
+    function handleDrop(e) {
+      e.preventDefault();
+      const sourceIndex = e.dataTransfer.getData("text/plain");
+      const targetPiece = e.target;
+      const sourcePiece = gameContainer.querySelector(`.puzzle-piece[data-current-index='${sourceIndex}']`);
+      if (sourcePiece && sourcePiece !== targetPiece) {
+        swapPieces(sourcePiece, targetPiece);
+      }
+    }
+    function handleDragEnd(e) {
+      e.target.classList.remove("selected");
+    }
+
+    // Swap two pieces and update board state
+    function swapPieces(piece1, piece2) {
+      let index1 = parseInt(piece1.dataset.currentIndex);
+      let index2 = parseInt(piece2.dataset.currentIndex);
+
+      // Swap positions in the board array
+      [board[index1], board[index2]] = [board[index2], board[index1]];
+      // Update data attributes to reflect the swap
+      piece1.dataset.currentIndex = index2;
+      piece2.dataset.currentIndex = index1;
+
+      // Visually swap the two pieces in the DOM by using a temporary placeholder
+      let temp = document.createElement("div");
+      gameContainer.replaceChild(temp, piece1);
+      gameContainer.replaceChild(piece1, piece2);
+      gameContainer.replaceChild(piece2, temp);
+
+      // Increase the move count and update the UI
+      moveCount++;
+      moveCountDisplay.textContent = moveCount;
+      if (mode === "limited") {
+        let movesLeft = moveLimit - moveCount;
+        movesLeftSpan.textContent = movesLeft;
+        if (movesLeft <= 0 && !isSolved()) {
+          endGame(false, "No moves left. Game Over!");
+          return;
+        }
+      }
+
+      // Check if the puzzle is solved
+      if (isSolved()) {
+        endGame(true);
+      }
+    }
+
+    // Check if current board order matches the solved order
+    function isSolved() {
+      for (let i = 0; i < board.length; i++) {
+        if (board[i] != correctOrder[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Start the appropriate timer based on game mode
+    function startTimer() {
+      if (mode === "timed") {
+        timerInterval = setInterval(function() {
+          remainingTime--;
+          timeDisplay.textContent = remainingTime;
+          if (remainingTime <= 0) {
+            clearInterval(timerInterval);
+            endGame(false, "Time's up! Game Over!");
+          }
+        }, 1000);
+      } else {
+        timerInterval = setInterval(function() {
+          elapsedTime++;
+          timeDisplay.textContent = elapsedTime;
+        }, 1000);
+      }
+    }
+
+    // End game routine: display win or game over overlay
+    function endGame(solved, message) {
+      clearInterval(timerInterval);
+      overlay.style.display = "flex";
+      let timeTaken = mode === "timed" ? (timeLimit - remainingTime) : elapsedTime;
+      if (solved) {
+        overlayContent.innerHTML = `<h2>Congratulations!</h2>
+          <p>You solved the puzzle in ${moveCount} moves and ${timeTaken} seconds.</p>
+          <button onclick="restartGame()">Play Again</button>`;
+      } else {
+        overlayContent.innerHTML = `<h2>Game Over!</h2>
+          <p>${message}</p>
+          <button onclick="restartGame()">Try Again</button>`;
+      }
+    }
+
+    // Restart by hiding the game board and re‑showing the menu
+    function restartGame() {
+      overlay.style.display = "none";
+      document.getElementById("menu").style.display = "block";
+      gameInfo.style.display = "none";
+      gameContainer.innerHTML = "";
+    }
+  </script>
+</body>
+</html>
